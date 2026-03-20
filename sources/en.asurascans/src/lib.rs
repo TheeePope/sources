@@ -14,7 +14,7 @@ use aidoku::{
 
 mod helpers;
 
-const BASE_URL: &str = "https://asuracomic.net";
+const BASE_URL: &str = "https://asurascans.com";
 
 struct AsuraScans;
 
@@ -61,7 +61,7 @@ impl Source for AsuraScans {
 			}
 		}
 
-		let url = format!("{BASE_URL}/series?{qs}");
+		let url = format!("{BASE_URL}/comics?{qs}");
 		let html = Request::get(url)?.html()?;
 
 		let entries = html
