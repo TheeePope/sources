@@ -3,21 +3,17 @@ use aidoku::{alloc::string::String, prelude::*};
 
 /// Returns the ID of a manga from a URL.
 pub fn get_manga_key(url: &str) -> Option<String> {
-	// Asura Scans appends a random string at the end of each series slug
-	// The random string is not necessary, but we must leave the trailing '-' else the url will break
-
 	// remove query parameters
 	let path = url.split('?').next().unwrap_or("");
 
-	// find the segment after "series"
+	// find the segment after "comics" or legacy "series"
 	let manga_segment = path
 		.split('/')
-		.skip_while(|segment| *segment != "series")
+		.skip_while(|segment| *segment != "comics" && *segment != "series")
 		.nth(1)?;
 
-	// find the last '-' and keep it in the id
-	let pos = manga_segment.rfind('-')?;
-	Some(manga_segment[..=pos].into())
+	// keep the FULL slug now
+	Some(manga_segment.into())
 }
 
 /// Returns the ID of a chapter from a URL.
@@ -46,7 +42,7 @@ pub fn get_manga_url(manga_id: &str) -> String {
 
 /// Returns full URL of a chapter from a chapter ID and manga ID.
 pub fn get_chapter_url(chapter_id: &str, manga_id: &str) -> String {
-	format!("{BASE_URL}/series/{manga_id}/chapter/{chapter_id}")
+	format!("{BASE_URL}/comics/{manga_id}/chapter/{chapter_id}")
 }
 
 #[cfg(test)]
