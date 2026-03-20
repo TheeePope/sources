@@ -37,7 +37,7 @@ pub fn get_chapter_key(url: &str) -> Option<String> {
 
 /// Returns full URL of a manga from a manga ID.
 pub fn get_manga_url(manga_id: &str) -> String {
-	format!("{BASE_URL}/series/{manga_id}")
+	format!("{BASE_URL}/comics/{manga_id}")
 }
 
 /// Returns full URL of a chapter from a chapter ID and manga ID.
