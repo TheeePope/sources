@@ -116,22 +116,33 @@ impl Source for AsuraScans {
 					})
 				});
 
-			manga.description = html
+						manga.description = html
 				.select("p, div, span")
 				.and_then(|els| {
 					els.filter_map(|el| el.text()).find(|text| {
 						let t = text.trim();
-						!t.is_empty()
-							&& t.len() > 60
-							&& !t.contains("Join Discord")
-							&& !t.contains("Home")
-							&& !t.contains("Browse")
-							&& !t.contains("Bookmarks")
-							&& !t.contains("Rankings")
-							&& !t.contains("Comics")
-							&& !t.contains("Users")
-							&& !t.starts_with("Chapter ")
-							&& !t.starts_with("Ch.")
+						if t.is_empty()
+							|| t.len() < 80
+							|| t.contains("Join Discord")
+							|| t.contains("Show more")
+							|| t == "Home"
+							|| t == "Browse"
+							|| t == "Bookmarks"
+							|| t == "Rankings"
+							|| t == "Comics"
+							|| t == "Users"
+							|| t == "First Chapter"
+							|| t == "Latest Chapter"
+							|| t.starts_with("Chapter ")
+							|| t.starts_with("Ch.")
+						{
+							return false;
+						}
+
+						let ascii_letters = t.chars().filter(|c| c.is_ascii_alphabetic()).count();
+						let non_ascii = t.chars().filter(|c| !c.is_ascii()).count();
+
+						ascii_letters > 30 && non_ascii < (t.len() / 8)
 					})
 				});
 
@@ -140,104 +151,116 @@ impl Source for AsuraScans {
 			manga.viewer = Viewer::Webtoon;
 		}
 
-		if needs_chapters {
+				if needs_chapters {
 			let manga_prefix = format!("{}/chapter/", helpers::get_manga_url(&manga.key));
 
-			let mut chapters: Vec<Chapter> = html
-				.select("a[href]")
-				.map(|els| {
-					els.filter_map(|el| {
-						let raw_url = el.attr("abs:href")?;
+			manga.chapters = Some(
+				html.select("div.group")
+					.map(|els| {
+						els.filter_map(|el| {
+							let link = el.select_first("a[href*='/chapter/']")?;
+							let raw_url = link.attr("abs:href")?;
 
-						if !raw_url.starts_with(&manga_prefix) {
-							return None;
-						}
+							if !raw_url.starts_with(&manga_prefix) {
+								return None;
+							}
 
-						let key = helpers::get_chapter_key(&raw_url)?;
-						let raw_text = el.text()?.trim().to_string();
+							let key = helpers::get_chapter_key(&raw_url)?;
 
-						if raw_text.is_empty()
-							|| raw_text == "First Chapter"
-							|| raw_text == "Latest Chapter"
-							|| raw_text.contains("Start Reading")
-							|| raw_text.contains("Join Discord")
-						{
-							return None;
-						}
+							let chapter_label = el
+								.select_first("h3.text-sm")
+								.and_then(|e| e.own_text())
+								.unwrap_or_default()
+								.trim()
+								.to_string();
 
-						let chapter_number = if let Some(rest) = raw_text.split("Chapter ").nth(1) {
-							rest.chars()
-								.take_while(|c| c.is_ascii_digit() || *c == '.')
-								.collect::<String>()
+							if chapter_label.is_empty()
+								|| chapter_label == "First Chapter"
+								|| chapter_label == "Latest Chapter"
+								|| chapter_label.contains("Start Reading")
+							{
+								return None;
+							}
+
+							let subtitle = el
+								.select_first("h3 > span")
+								.and_then(|e| e.text());
+
+							let title = if let Some(sub) = subtitle {
+								let s = sub.trim();
+								if s.is_empty() {
+									Some(chapter_label.clone())
+								} else {
+									Some(format!("{} - {}", chapter_label, s))
+								}
+							} else {
+								Some(chapter_label.clone())
+							};
+
+							let chapter_number = chapter_label
+								trim_start_matches("Chapter ")
+								.trim_start_matches("Ch.")
 								.parse()
-								.ok()
-						} else if let Some(rest) = raw_text.split("Ch.").nth(1) {
-							rest.chars()
-								.take_while(|c| c.is_ascii_digit() || *c == '.')
-								.collect::<String>()
-								.parse()
-								.ok()
-						} else {
-							None
-						};
+								.ok();
 
-						let chapter_number = match chapter_number {
-							Some(n) if n < 5000.0 => Some(n),
-							_ => None,
-						}?;
+							let raw_date = el
+								.select_first("h3 + h3")
+								.and_then(|e| e.own_text());
 
-						Some(Chapter {
-							key,
-							title: Some(raw_text),
-							chapter_number: Some(chapter_number),
-							url: Some(raw_url),
-							..Default::default()
+							let date_uploaded = raw_date.and_then(|s| {
+								let s = s.trim().to_string();
+								parse_date(s.clone(), "MMM d, yyyy")
+									.or_else(|| parse_date(s, "MMMM d yyyy"))
+							});
+
+							Some(Chapter {
+								key,
+								title,
+								chapter_number,
+								date_uploaded,
+								url: Some(raw_url),
+								..Default::default()
+							})
 						})
+						.collect()
 					})
-					.collect::<Vec<Chapter>>()
-				})
-				.unwrap_or_default();
-
-			chapters.sort_by(|a, b| {
-				b.chapter_number
-					.partial_cmp(&a.chapter_number)
-					.unwrap_or(core::cmp::Ordering::Equal)
-			});
-
-			manga.chapters = Some(chapters);
+					.unwrap_or_default()
+			);
 		}
-
 		Ok(manga)
 	}
 
-	fn get_page_list(&self, manga: Manga, chapter: Chapter) -> Result<Vec<Page>> {
-		let url = helpers::get_chapter_url(&chapter.key, &manga.key);
+		fn get_page_list(&self, manga: Manga, chapter: Chapter) -> Result<Vec<Page>> {
+		let url = chapter
+			.url
+			.clone()
+			.unwrap_or_else(|| helpers::get_chapter_url(&chapter.key, &manga.key));
+
 		let response = Request::get(url)?.string()?;
 
-		// Remove script tags from hydration that can cut up the page list
 		let html_text = response.replace(r#""])</script><script>self.__next_f.push([1,""#, "");
-
-		// Find bounds of the page list JSON
-		let page_list_marker = r#"\"pages\":[{\"order\":1,\"url\":\"https://"#;
-		let page_list_start = html_text.find(page_list_marker).unwrap_or(0);
-		let page_list_end = html_text[page_list_start..].find(r#"}]"#).unwrap_or(0);
-
-		let page_list_slice = &html_text[page_list_start..page_list_start + page_list_end];
 
 		let mut pages = Vec::new();
 		let mut search_start = 0;
 
-		while let Some(pos) =
-			page_list_slice[search_start..].find("https://gg.asuracomic.net/storage/media/")
-		{
+		while let Some(pos) = html_text[search_start..].find("https://") {
 			let url_start = search_start + pos;
-			let rest = &page_list_slice[url_start..];
+			let rest = &html_text[url_start..];
+
 			if let Some(url_end) = rest.find('"') {
-				let url = rest[..url_end].replace("\\", "");
-				pages.push(Page {
-					content: PageContent::url(url),
-					..Default::default()
-				});
+				let page_url = rest[..url_end].replace("\\", "");
+
+				if page_url.contains("/storage/")
+					|| page_url.contains("/media/")
+					|| page_url.contains("asurascans")
+					|| page_url.contains("asuracomic")
+				{
+					pages.push(Page {
+						content: PageContent::url(page_url),
+						..Default::default()
+					});
+				}
+
 				search_start = url_start + url_end;
 			} else {
 				break;
