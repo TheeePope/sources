@@ -53,41 +53,41 @@ mod tests {
 	#[aidoku_test]
 	fn test_manga_keys() {
 		assert_eq!(
-			get_manga_key("https://asuracomic.net/series/swordmasters-youngest-son-cb22671f")
+			get_manga_key("https://asurascans.com/comics/swordmasters-youngest-son-cb22671f")
 				.as_deref(),
-			Some("swordmasters-youngest-son-")
+			Some("swordmasters-youngest-son-cb22671f")
 		);
 		assert_eq!(
 			get_manga_key(
-				"https://asuracomic.net/series/swordmasters-youngest-son-cb22671f?blahblah"
+				"https://asurascans.com/comics/swordmasters-youngest-son-cb22671f?blahblah"
 			)
 			.as_deref(),
-			Some("swordmasters-youngest-son-")
+			Some("swordmasters-youngest-son-cb22671f")
 		);
 		assert_eq!(
 			get_manga_key(
-				"https://asuracomic.net/series/swordmasters-youngest-son-cb22671f/chapter/1"
+				"https://asurascans.com/comics/swordmasters-youngest-son-cb22671f/chapter/1"
 			)
 			.as_deref(),
-			Some("swordmasters-youngest-son-")
+			Some("swordmasters-youngest-son-cb22671f")
 		);
 	}
 
 	#[aidoku_test]
 	fn test_chapter_keys() {
 		assert_eq!(
-			get_chapter_key("https://asuracomic.net/series/swordmasters-youngest-son-cb22671f"),
+			get_chapter_key("https://asurascans.com/comics/swordmasters-youngest-son-cb22671f"),
 			None
 		);
 		assert_eq!(
 			get_chapter_key(
-				"https://asuracomic.net/series/swordmasters-youngest-son-cb22671f?blahblah"
+				"https://asurascans.com/comics/swordmasters-youngest-son-cb22671f?blahblah"
 			),
 			None
 		);
 		assert_eq!(
 			get_chapter_key(
-				"https://asuracomic.net/series/swordmasters-youngest-son-cb22671f/chapter/1"
+				"https://asurascans.com/comics/swordmasters-youngest-son-cb22671f/chapter/1"
 			)
 			.as_deref(),
 			Some("1")
