@@ -254,132 +254,167 @@ impl Source for AsuraScans {
 impl Home for AsuraScans {
 	fn get_home(&self) -> Result<HomeLayout> {
 		let html = Request::get(BASE_URL)?.html()?;
-
 		let mut components = Vec::new();
 
-		if let Some(hero) = html.select_first("div.owl-carousel") {
-			let entries: Vec<Manga> = hero
-				.select(".slider > .slide")
-				.map(|els| {
-					els.filter_map(|el| {
-						let link = el.select_first("a")?;
-						let key = helpers::get_manga_key(&link.attr("abs:href")?)?;
-						Some(Manga {
+		// Trending Today
+		let trending_entries: Vec<Link> = html
+			.select("a[href*='/comics/']:not([href*='/chapter/'])")
+			.map(|els| {
+				els.filter_map(|el| {
+					let href = el.attr("abs:href")?;
+					let key = helpers::get_manga_key(&href)?;
+
+					let raw_title = el.text()?.trim().to_string();
+
+					// Clean titles like "9.8 Omniscient Reader’s Viewpoint"
+					let title = if let Some((first, rest)) = raw_title.split_once(' ') {
+						if first.chars().all(|c| c.is_ascii_digit() || c == '.') {
+							rest.trim().to_string()
+						} else {
+							raw_title.clone()
+						}
+					} else {
+						raw_title.clone()
+					};
+
+					if title.is_empty()
+						|| title == "Home"
+						|| title == "Browse"
+						|| title == "Bookmarks"
+						|| title == "Rankings"
+						|| title == "Comics"
+						|| title == "Users"
+						|| title.starts_with("Chapter ")
+					{
+						return None;
+					}
+
+					let cover = el
+						.parent()
+						.and_then(|p| p.select_first("img"))
+						.and_then(|img| img.attr("abs:src"))
+						.or_else(|| el.select_first("img").and_then(|img| img.attr("abs:src")));
+
+					Some(
+						Manga {
 							key,
-							title: link.text()?,
-							cover: el.select_first("img").and_then(|img| img.attr("abs:src")),
-							description: el.select_first("div.summary").and_then(|el| el.text()),
-							tags: el
-								.select("span.extra-category:not(.hidden) > a")
-								.map(|els| {
-									els.filter_map(|el| el.text())
-										.map(|s| s.trim_end_matches(",").into())
-										.filter(|s: &String| !s.is_empty() && s != "...")
-										.collect()
-								}),
+							title,
+							cover,
 							..Default::default()
-						})
-					})
-					.collect()
+						}
+						.into(),
+					)
 				})
-				.unwrap_or_default();
-			if !entries.is_empty() {
-				components.push(HomeComponent {
-					title: None,
-					subtitle: None,
-					value: HomeComponentValue::BigScroller {
-						entries,
-						auto_scroll_interval: Some(5.0),
-					},
-				});
-			}
+				.collect()
+			})
+			.unwrap_or_default();
+
+		if !trending_entries.is_empty() {
+			components.push(HomeComponent {
+				title: Some("Trending Today".into()),
+				subtitle: None,
+				value: HomeComponentValue::Scroller {
+					entries: trending_entries,
+					listing: None,
+				},
+			});
 		}
 
-		if let Some(popular_today) = html.select_first("div.text-white.pt-2") {
-			let title = popular_today
-				.select_first("h3")
-				.and_then(|el| el.text())
-				.unwrap_or("Popular Today".into());
-			let entries: Vec<Link> = popular_today
-				.select("div.flex-wrap.hidden > div > a")
-				.map(|els| {
-					els.filter_map(|el| {
-						let key = helpers::get_manga_key(&el.attr("abs:href")?)?;
-						Some(
-							Manga {
-								key,
-								title: el.select_first("span.block")?.text()?,
-								cover: el.select_first("img").and_then(|img| img.attr("abs:src")),
-								..Default::default()
-							}
-							.into(),
-						)
-					})
-					.collect()
-				})
-				.unwrap_or_default();
-			if !entries.is_empty() {
-				components.push(HomeComponent {
-					title: Some(title),
-					subtitle: None,
-					value: HomeComponentValue::Scroller {
-						entries,
-						listing: None,
-					},
-				});
-			}
-		}
+		// Latest Updates
+		let latest_entries: Vec<MangaWithChapter> = html
+			.select("a[href*='/comics/']:not([href*='/chapter/'])")
+			.map(|els| {
+				els.filter_map(|el| {
+					let href = el.attr("abs:href")?;
+					let manga_key = helpers::get_manga_key(&href)?;
 
-		if let Some(latest_updates) = html.select_first("div.text-white.mb-1") {
-			let title = latest_updates
-				.select_first("h3")
-				.and_then(|el| el.text())
-				.unwrap_or("Latest Updates".into());
-			let entries: Vec<MangaWithChapter> = latest_updates
-				.select(".grid > div > .grid")
-				.map(|els| {
-					els.filter_map(|el| {
-						let link = el.select_first("span > a")?;
-						let chapter_link = el.select_first(".flex > span a")?;
-						let manga_key = helpers::get_manga_key(&link.attr("abs:href")?)?;
-						let chapter_key =
-							helpers::get_chapter_key(&chapter_link.attr("abs:href")?)?;
-						let chapter_number = chapter_link
-							.select_first("p")?
-							.text()?
-							.strip_prefix("Chapter ")?
-							.split(" ")
-							.next()?
-							.parse()
-							.ok();
-						Some(MangaWithChapter {
-							manga: Manga {
-								key: manga_key,
-								title: link.text()?,
-								cover: el.select_first("img").and_then(|img| img.attr("abs:src")),
-								..Default::default()
-							},
-							chapter: Chapter {
-								key: chapter_key,
-								chapter_number,
-								..Default::default()
-							},
-						})
+					let raw_title = el.text()?.trim().to_string();
+
+					let title = if let Some((first, rest)) = raw_title.split_once(' ') {
+						if first.chars().all(|c| c.is_ascii_digit() || c == '.') {
+							rest.trim().to_string()
+						} else {
+							raw_title.clone()
+						}
+					} else {
+						raw_title.clone()
+					};
+
+					if title.is_empty()
+						|| title == "Home"
+						|| title == "Browse"
+						|| title == "Bookmarks"
+						|| title == "Rankings"
+						|| title == "Comics"
+						|| title == "Users"
+						|| title.starts_with("Chapter ")
+					{
+						return None;
+					}
+
+					let cover = el
+						.parent()
+						.and_then(|p| p.select_first("img"))
+						.and_then(|img| img.attr("abs:src"))
+						.or_else(|| el.select_first("img").and_then(|img| img.attr("abs:src")));
+
+					let chapter_link = el
+						.parent()
+						.and_then(|p| p.select_first("a[href*='/chapter/']"))
+						.or_else(|| {
+							el.parent()
+								.and_then(|p| p.parent())
+								.and_then(|gp| gp.select_first("a[href*='/chapter/']"))
+						});
+
+					let chapter = if let Some(ch_el) = chapter_link {
+						let chapter_href = ch_el.attr("abs:href").unwrap_or_default();
+						let chapter_key = helpers::get_chapter_key(&chapter_href).unwrap_or_default();
+						let raw_chapter_title = ch_el.text().unwrap_or_else(|| "Chapter".into());
+
+						let chapter_number = raw_chapter_title
+							.strip_prefix("Chapter ")
+							.and_then(|s| s.split([' ', '-']).next())
+							.and_then(|s| s.parse().ok());
+
+						Chapter {
+							key: chapter_key,
+							title: Some(raw_chapter_title),
+							chapter_number,
+							url: Some(chapter_href),
+							..Default::default()
+						}
+					} else {
+						Chapter {
+							key: "".into(),
+							..Default::default()
+						}
+					};
+
+					Some(MangaWithChapter {
+						manga: Manga {
+							key: manga_key,
+							title,
+							cover,
+							..Default::default()
+						},
+						chapter,
 					})
-					.collect()
 				})
-				.unwrap_or_default();
-			if !entries.is_empty() {
-				components.push(HomeComponent {
-					title: Some(title),
-					subtitle: None,
-					value: HomeComponentValue::MangaChapterList {
-						page_size: None,
-						entries,
-						listing: None,
-					},
-				});
-			}
+				.collect()
+			})
+			.unwrap_or_default();
+
+		if !latest_entries.is_empty() {
+			components.push(HomeComponent {
+				title: Some("Latest Updates".into()),
+				subtitle: None,
+				value: HomeComponentValue::MangaChapterList {
+					page_size: None,
+					entries: latest_entries,
+					listing: None,
+				},
+			});
 		}
 
 		Ok(HomeLayout { components })
