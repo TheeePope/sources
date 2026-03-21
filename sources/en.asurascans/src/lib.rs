@@ -91,7 +91,7 @@ impl Source for AsuraScans {
 		})
 	}
 
-	fn get_manga_update(
+		fn get_manga_update(
 		&self,
 		mut manga: Manga,
 		needs_details: bool,
@@ -102,112 +102,109 @@ impl Source for AsuraScans {
 
 		if needs_details {
 			manga.title = html
-				.select_first("span.text-xl.font-bold, h3.truncate")
-				.and_then(|el| el.own_text())
+				.select_first("h1, h2, h3")
+				.and_then(|el| el.text())
 				.unwrap_or(manga.title);
+
 			manga.cover = html
 				.select_first("img[alt=poster]")
-				.and_then(|el| el.attr("abs:src"));
-			manga.artists = html
-				.select_first("div.grid > div:has(h3:eq(0):containsOwn(Artist)) > h3:eq(1)")
-				.and_then(|el| el.text())
-				.and_then(|s| if s != "_" { Some(vec![s]) } else { None });
-			manga.authors = html
-				.select_first("div.grid > div:has(h3:eq(0):containsOwn(Author)) > h3:eq(1)")
-				.and_then(|el| el.text())
-				.and_then(|s| if s != "_" { Some(vec![s]) } else { None });
+				.and_then(|el| el.attr("abs:src"))
+				.or_else(|| {
+					html.select("img").and_then(|els| {
+						els.filter_map(|el| el.attr("abs:src"))
+							.find(|src| src.contains("/storage/") || src.contains("/covers/"))
+					})
+				});
+
 			manga.description = html
-				.select_first("span.font-medium.text-sm")
-				.and_then(|el| el.text());
+				.select("p, div, span")
+				.and_then(|els| {
+					els.filter_map(|el| el.text()).find(|text| {
+						let t = text.trim();
+						!t.is_empty()
+							&& t.len() > 60
+							&& !t.contains("Join Discord")
+							&& !t.contains("Home")
+							&& !t.contains("Browse")
+							&& !t.contains("Bookmarks")
+							&& !t.contains("Rankings")
+							&& !t.contains("Comics")
+							&& !t.contains("Users")
+							&& !t.starts_with("Chapter ")
+							&& !t.starts_with("Ch.")
+					})
+				});
+
 			manga.url = Some(url);
-			manga.tags = html
-				.select("div[class^=space] > div.flex > button.text-white")
-				.map(|els| els.filter_map(|el| el.text()).collect());
-			manga.status = html
-				.select_first("div.flex:has(h3:eq(0):containsOwn(Status)) > h3:eq(1)")
-				.and_then(|el| el.text())
-				.map(|s| match s.as_str() {
-					"Ongoing" => MangaStatus::Ongoing,
-					"Hiatus" => MangaStatus::Hiatus,
-					"Completed" => MangaStatus::Completed,
-					"Dropped" => MangaStatus::Cancelled,
-					"Season End" => MangaStatus::Hiatus,
-					_ => MangaStatus::Unknown,
-				})
-				.unwrap_or_default();
-			let tags = manga.tags.as_deref().unwrap_or_default();
-			manga.content_rating = if tags
-				.as_ref()
-				.iter()
-				.any(|e| matches!(e.as_str(), "Adult" | "Ecchi"))
-			{
-				ContentRating::Suggestive
-			} else {
-				ContentRating::Safe
-			};
-			manga.viewer = html
-				.select_first("div.flex:has(h3:eq(0):containsOwn(Type)) > h3:eq(1)")
-				.and_then(|el| el.text())
-				.map(|s| match s.as_str() {
-					"Manhwa" => Viewer::Webtoon,
-					"Manhua" => Viewer::Webtoon,
-					"Manga" => Viewer::RightToLeft,
-					_ => Viewer::Webtoon,
-				})
-				.unwrap_or(Viewer::Webtoon);
+			manga.status = MangaStatus::Unknown;
+			manga.viewer = Viewer::Webtoon;
 		}
 
 		if needs_chapters {
-			manga.chapters = html
-				.select("div.scrollbar-thumb-themecolor > div.group")
+			let manga_prefix = format!("{}/chapter/", helpers::get_manga_url(&manga.key));
+
+			let mut chapters: Vec<Chapter> = html
+				.select("a[href]")
 				.map(|els| {
 					els.filter_map(|el| {
-						let raw_url = el.select_first("a")?.attr("abs:href")?;
+						let raw_url = el.attr("abs:href")?;
+
+						if !raw_url.starts_with(&manga_prefix) {
+							return None;
+						}
+
 						let key = helpers::get_chapter_key(&raw_url)?;
-						let title = el.select("h3 > span").and_then(|els| els.text());
-						let chapter_number = el
-							.select_first("h3.text-sm")
-							.and_then(|el| el.own_text())
-							.and_then(|s| s.trim_start_matches("Chapter ").parse().ok());
-						let date_uploaded = el
-							.select_first("h3 + h3")
-							.and_then(|els| els.own_text())
-							.map(|s| {
-								let mut parts = s.split_whitespace().collect::<Vec<&str>>();
+						let raw_text = el.text()?.trim().to_string();
 
-								// Check if the date has 3 parts, Month Day Year
-								if parts.len() == 3 {
-									let day = parts[1];
+						if raw_text.is_empty()
+							|| raw_text == "First Chapter"
+							|| raw_text == "Latest Chapter"
+							|| raw_text.contains("Start Reading")
+							|| raw_text.contains("Join Discord")
+						{
+							return None;
+						}
 
-									// Remove any non-digit characters from the day
-									// We are trying to remove all the suffixes from the day
-									let cleaned_day = day
-										.chars()
-										.filter(|c| c.is_ascii_digit())
-										.collect::<String>();
+						let chapter_number = if let Some(rest) = raw_text.split("Chapter ").nth(1) {
+							rest.chars()
+								.take_while(|c| c.is_ascii_digit() || *c == '.')
+								.collect::<String>()
+								.parse()
+								.ok()
+						} else if let Some(rest) = raw_text.split("Ch.").nth(1) {
+							rest.chars()
+								.take_while(|c| c.is_ascii_digit() || *c == '.')
+								.collect::<String>()
+								.parse()
+								.ok()
+						} else {
+							None
+						};
 
-									parts[1] = &cleaned_day;
+						let chapter_number = match chapter_number {
+							Some(n) if n < 5000.0 => Some(n),
+							_ => None,
+						}?;
 
-									parts.join(" ")
-								} else {
-									s
-								}
-							})
-							.and_then(|s| parse_date(s, "MMMM d yyyy"));
-						let url = helpers::get_chapter_url(&key, &manga.key);
-						let locked = el.select_first("h3 > span > svg").is_some();
 						Some(Chapter {
 							key,
-							title,
-							chapter_number,
-							date_uploaded,
-							url: Some(url),
-							locked,
+							title: Some(raw_text),
+							chapter_number: Some(chapter_number),
+							url: Some(raw_url),
 							..Default::default()
 						})
 					})
-					.collect()
+					.collect::<Vec<Chapter>>()
 				})
+				.unwrap_or_default();
+
+			chapters.sort_by(|a, b| {
+				b.chapter_number
+					.partial_cmp(&a.chapter_number)
+					.unwrap_or(core::cmp::Ordering::Equal)
+			});
+
+			manga.chapters = Some(chapters);
 		}
 
 		Ok(manga)
