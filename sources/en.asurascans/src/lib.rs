@@ -198,10 +198,11 @@ impl Source for AsuraScans {
 							};
 
 							let chapter_number = chapter_label
-								trim_start_matches("Chapter ")
-								.trim_start_matches("Ch.")
-								.parse()
-								.ok();
+    .trim_start_matches("Chapter ")
+    .trim_start_matches("Ch.")
+    .trim()
+    .parse::<f32>()
+    .ok();
 
 							let raw_date = el
 								.select_first("h3 + h3")
