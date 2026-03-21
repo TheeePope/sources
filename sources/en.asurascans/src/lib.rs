@@ -91,7 +91,7 @@ impl Source for AsuraScans {
 		})
 	}
 
-		fn get_manga_update(
+			fn get_manga_update(
 		&self,
 		mut manga: Manga,
 		needs_details: bool,
